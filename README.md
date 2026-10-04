@@ -1,71 +1,74 @@
-# ROM data-driven: piastra forata con concentrazione di tensione (plasticità)
+# Data-driven ROM: plate with a hole (stress concentration, plasticity)
 
-Surrogato non intrusivo (PODI) di un modello FEM in APDL: dai **parametri di progetto** (geometria e materiale) ai
-campi nodali, senza rifare la simulazione. Il carico è fisso (150 MPa a lordo, rampa in 10 passi).
+Non-intrusive surrogate (PODI) of an APDL finite element model: it maps **design parameters** (geometry and
+material) to nodal fields, without re-running the simulation. The load is fixed (150 MPa gross stress, ramped in
+10 load steps).
 
 ## Setup
-Python 3.10 o superiore (testato con 3.12):
+Python 3.10 or later (tested with 3.12):
 ```
 python -m venv .venv
 .venv\Scripts\activate          # Linux/macOS: source .venv/bin/activate
 pip install -r requirements.txt
 ```
-- **ANSYS MAPDL con licenza** serve solo per la fase offline (`run_doe.py`, `export_mesh.py`). Testato con ANSYS 2025 R1.
-  Se non e' nel percorso di default (`C:\Program Files\ANSYS Inc\v251\...`), indica l'eseguibile con la variabile
-  d'ambiente `MAPDL_EXEC` (es. `set MAPDL_EXEC=C:\...\ANSYS251.exe`); se non e' impostata PyMAPDL cerca l'installazione da solo.
-- **Senza ANSYS** `rom.py` e `plots.py` funzionano comunque: gli snapshot sono gia' in `scripts/data/`.
-  `ansys-mapdl-core` va installato lo stesso perche' `rom.py` importa `fem.py`.
-- I `.pkl` in `scripts/results/` dipendono dalle versioni di numpy/scipy: se non si caricano, rigenerarli con `python rom.py`.
+- **A licensed ANSYS MAPDL installation** is only needed for the offline phase (`run_doe.py`, `export_mesh.py`).
+  Tested with ANSYS 2025 R1. If it is not in the default location (`C:\Program Files\ANSYS Inc\v251\...`), point to the
+  executable with the `MAPDL_EXEC` environment variable (e.g. `set MAPDL_EXEC=C:\...\ANSYS251.exe`); if it is not
+  set, PyMAPDL looks for the installation on its own.
+- **Without ANSYS**, `rom.py` and `plots.py` still work: the snapshots are already in `scripts/data/`.
+  `ansys-mapdl-core` must still be installed because `rom.py` imports `fem.py`.
+- The `.pkl` files in `scripts/results/` depend on the numpy/scipy versions: if they fail to load, regenerate them
+  with `python rom.py`.
 
-## Modello FEM (`plate_hole.apdl`)
-Quarto di piastra 50 x 75 mm, foro ellittico, PLANE183 in tensione piana, plasticità bilineare (BISO),
-mesh mapped a topologia fissa (1529 nodi, 480 elementi): al variare di a, b la mesh si deforma (morphing) ma
-nodi ed elementi restano gli stessi, quindi gli snapshot sono confrontabili nodo per nodo.
+## FEM model (`plate_hole.apdl`)
+Quarter of a 50 x 75 mm plate with an elliptical hole, PLANE183 in plane stress, bilinear isotropic hardening (BISO),
+mapped mesh with fixed topology (1529 nodes, 480 elements). When `a_h` and `b_h` change the mesh is morphed but nodes
+and elements stay the same, so snapshots are comparable node by node.
 
-| parametro | significato | intervallo |
+| parameter | meaning | range |
 |---|---|---|
-| `a_h` | semiasse foro in X (perpendicolare al carico) | 6 - 18 mm |
-| `b_h` | semiasse foro in Y (parallelo al carico) | 6 - 18 mm |
-| `sy` | tensione di snervamento | 250 - 450 MPa |
-| `Htan` | modulo tangente di incrudimento | 500 - 5000 MPa |
+| `a_h` | hole semi-axis along X (perpendicular to the load) | 6 - 18 mm |
+| `b_h` | hole semi-axis along Y (parallel to the load) | 6 - 18 mm |
+| `sy` | yield stress | 250 - 450 MPa |
+| `Htan` | hardening tangent modulus | 500 - 5000 MPa |
 
-Circa il 19% dei campioni resta elastico (Kt·150 < sy): il ROM deve riprodurre anche l'insorgenza della plasticità.
+About 19% of the samples stay elastic (Kt·150 < sy), so the ROM also has to capture the onset of plasticity.
 
 ## Pipeline
-Gli script sono in `scripts/` e vanno lanciati da lì:
+The scripts are in `scripts/` and must be run from there:
 ```
 cd scripts
-python run_doe.py 150 0     # offline: LHS + 150 run MAPDL (~4.5 s l'uno) -> data/case_*.npz   (riprendibile)
-python export_mesh.py       # connettivita' per i plot -> data/mesh.npz
-python rom.py               # POD + RBF e GPR, errori sul test set, salva results/rom_*.pkl
-python plots.py             # grafici in results/
+python run_doe.py 150 0     # offline: LHS + 150 MAPDL runs (~4.5 s each) -> data/case_*.npz   (resumable)
+python export_mesh.py       # connectivity for the plots -> data/mesh.npz
+python rom.py               # POD + RBF and GPR, test-set errors, saves results/rom_*.pkl
+python plots.py             # figures in results/
 ```
-`sig_app` e `n_ls` sono duplicati in `plate_hole.apdl` e `fem.py`: vanno tenuti allineati.
+`sig_app` and `n_ls` are defined both in `plate_hole.apdl` and in `fem.py`: keep them aligned.
 
 ## ROM (`rom.py`)
-Per ogni campo (coordinate nodali, spostamenti, σyy, σvm, ε plastica eq., curve di carico all'apice del foro):
-SVD degli snapshot (media sottratta) → regressione dei coefficienti modali con
-**RBF** (kernel ed epsilon scelti con leave-one-out di Rippa) oppure **GPR** (kernel SE anisotropo).
-Come ingresso, oltre ai 4 parametri, c'è il rapporto di snervamento stimato `(1+2a/b)·σ_app/sy`:
-rende meno brusco il passaggio elastico-plastico.
+For each field (nodal coordinates, displacements, σyy, von Mises stress, equivalent plastic strain, load curves at the
+hole tip): SVD of the snapshots (mean removed), then regression of the modal coefficients with either
+**RBF** (kernel and epsilon chosen by Rippa's leave-one-out) or **GPR** (anisotropic SE kernel).
+Besides the 4 parameters, the regression input includes the estimated yield ratio `(1+2a/b)·σ_app/sy`, which makes
+the elastic-plastic transition less abrupt.
 
-## Risultati (120 casi di training, 30 di test)
-Errore L2 medio / massimo, normalizzato con il campo FEM di norma massima del test set.
+## Results (120 training cases, 30 test cases)
+Mean / max L2 error, normalized by the FEM field with the largest norm in the test set.
 
-| campo | modi | POD (proiezione) | RBF | GPR |
+| field | modes | POD (projection) | RBF | GPR |
 |---|---|---|---|---|
-| coordinate (morphing) | 6 | 1.6e-6 / 3.6e-6 | 1.5e-5 / 6.9e-5 | 5.7e-6 / 1.6e-5 |
-| spostamenti | 20 | 1.3e-4 / 3.5e-4 | 7.2e-4 / 3.0e-3 | 4.3e-4 / 2.2e-3 |
+| coordinates (morphing) | 6 | 1.6e-6 / 3.6e-6 | 1.5e-5 / 6.9e-5 | 5.7e-6 / 1.6e-5 |
+| displacements | 20 | 1.3e-4 / 3.5e-4 | 7.2e-4 / 3.0e-3 | 4.3e-4 / 2.2e-3 |
 | σyy | 20 | 2.3e-3 / 4.1e-3 | 9.5e-3 / 2.1e-2 | 5.4e-3 / 1.2e-2 |
-| σvm | 20 | 3.6e-3 / 6.8e-3 | 9.9e-3 / 2.0e-2 | 5.9e-3 / 1.3e-2 |
-| ε plastica eq. | 20 | 3.6e-3 / 1.3e-2 | 1.8e-2 / 4.8e-2 | 1.7e-2 / 7.1e-2 |
-| curva σyy apice | 8 | 2.6e-9 / 1.2e-8 | 1.2e-2 / 4.1e-2 | 4.4e-3 / 2.3e-2 |
-| curva ε plastica max | 7 | 5e-17 / 2e-16 | 1.1e-2 / 3.3e-2 | 3.7e-3 / 1.0e-2 |
+| von Mises stress | 20 | 3.6e-3 / 6.8e-3 | 9.9e-3 / 2.0e-2 | 5.9e-3 / 1.3e-2 |
+| equivalent plastic strain | 20 | 3.6e-3 / 1.3e-2 | 1.8e-2 / 4.8e-2 | 1.7e-2 / 7.1e-2 |
+| σyy curve at hole tip | 8 | 2.6e-9 / 1.2e-8 | 1.2e-2 / 4.1e-2 | 4.4e-3 / 2.3e-2 |
+| max plastic strain curve | 7 | 5e-17 / 2e-16 | 1.1e-2 / 3.3e-2 | 3.7e-3 / 1.0e-2 |
 
-Inferenza GPR: ~6 ms per punto contro ~4 s del FEM. Il collo di bottiglia è la regressione, non la POD
-(si vede dalla colonna "POD (proiezione)"); l'ε plastica è il campo più difficile per via della soglia di snervamento.
-Fit GPR: ~6 minuti (circa 140 GP indipendenti).
+GPR inference: ~6 ms per point versus ~4 s for the FEM run. The error is dominated by the regression, not by the POD
+truncation (compare with the "POD (projection)" column); equivalent plastic strain is the hardest field because of the
+yield threshold. GPR fitting takes ~6 minutes (about 100 independent GPs).
 
-## Note
-- `mapdl.mesh.grid.cells_dict` di PyMAPDL non è affidabile con elementi quadratici: la connettività si prende da `mapdl.mesh.elem`.
-- `tricontourf` si blocca con triangolazioni non valide: i plot usano `tripcolor`.
+## Notes
+- PyMAPDL's `mapdl.mesh.grid.cells_dict` is not reliable with quadratic elements: connectivity is taken from `mapdl.mesh.elem`.
+- `tricontourf` hangs on invalid triangulations: the plots use `tripcolor`.
