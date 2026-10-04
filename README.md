@@ -3,6 +3,20 @@
 Surrogato non intrusivo (PODI) di un modello FEM in APDL: dai **parametri di progetto** (geometria e materiale) ai
 campi nodali, senza rifare la simulazione. Il carico è fisso (150 MPa a lordo, rampa in 10 passi).
 
+## Setup
+Python 3.10 o superiore (testato con 3.12):
+```
+python -m venv .venv
+.venv\Scripts\activate          # Linux/macOS: source .venv/bin/activate
+pip install -r requirements.txt
+```
+- **ANSYS MAPDL con licenza** serve solo per la fase offline (`run_doe.py`, `export_mesh.py`). Testato con ANSYS 2025 R1.
+  Se non e' nel percorso di default (`C:\Program Files\ANSYS Inc\v251\...`), indica l'eseguibile con la variabile
+  d'ambiente `MAPDL_EXEC` (es. `set MAPDL_EXEC=C:\...\ANSYS251.exe`); se non e' impostata PyMAPDL cerca l'installazione da solo.
+- **Senza ANSYS** `rom.py` e `plots.py` funzionano comunque: gli snapshot sono gia' in `scripts/data/`.
+  `ansys-mapdl-core` va installato lo stesso perche' `rom.py` importa `fem.py`.
+- I `.pkl` in `scripts/results/` dipendono dalle versioni di numpy/scipy: se non si caricano, rigenerarli con `python rom.py`.
+
 ## Modello FEM (`plate_hole.apdl`)
 Quarto di piastra 50 x 75 mm, foro ellittico, PLANE183 in tensione piana, plasticità bilineare (BISO),
 mesh mapped a topologia fissa (1529 nodi, 480 elementi): al variare di a, b la mesh si deforma (morphing) ma
@@ -26,7 +40,6 @@ python export_mesh.py       # connettivita' per i plot -> data/mesh.npz
 python rom.py               # POD + RBF e GPR, errori sul test set, salva results/rom_*.pkl
 python plots.py             # grafici in results/
 ```
-Servono `ansys-mapdl-core`, numpy, scipy, matplotlib. Percorso di ANSYS in `fem.py` (`EXEC_FILE`).
 `sig_app` e `n_ls` sono duplicati in `plate_hole.apdl` e `fem.py`: vanno tenuti allineati.
 
 ## ROM (`rom.py`)

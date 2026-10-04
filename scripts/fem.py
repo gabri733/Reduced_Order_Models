@@ -1,4 +1,5 @@
 """Wrapper PyMAPDL: lancia plate_hole.apdl per un vettore di parametri mu ed estrae gli snapshot."""
+import os
 from pathlib import Path
 
 import numpy as np
@@ -6,7 +7,11 @@ from ansys.mapdl.core import launch_mapdl
 
 HERE = Path(__file__).parent
 APDL_FILE = HERE / "plate_hole.apdl"
-EXEC_FILE = r"C:\Program Files\ANSYS Inc\v251\ansys\bin\winx64\ANSYS251.exe"
+
+# Eseguibile di MAPDL: variabile d'ambiente MAPDL_EXEC, altrimenti il percorso di default sotto se esiste,
+# altrimenti None (PyMAPDL cerca da solo l'installazione di ANSYS).
+_DEFAULT_EXEC = r"C:\Program Files\ANSYS Inc\v251\ansys\bin\winx64\ANSYS251.exe"
+EXEC_FILE = os.environ.get("MAPDL_EXEC") or (_DEFAULT_EXEC if Path(_DEFAULT_EXEC).exists() else None)
 
 # nome, estremo inferiore, estremo superiore (spazio dei parametri di progetto)
 PARAMS = [
@@ -15,7 +20,7 @@ PARAMS = [
     ("sy",   250.0, 450.0),   # snervamento [MPa]
     ("Htan", 500.0, 5000.0),  # modulo tangente [MPa]
 ]
-SIG_APP = 150.0 # deve coincidere con sig_app nel file APDL
+SIG_APP = 150.0  # deve coincidere con sig_app nel file APDL
 N_LS = 10        # idem per n_ls
 
 
