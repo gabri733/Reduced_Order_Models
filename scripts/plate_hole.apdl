@@ -1,0 +1,111 @@
+! =========================================================================
+! PIASTRA CON FORO ELLITTICO IN PLASTICITA' (QUARTO DI MODELLO, PLANE STRESS)
+! Unita': N, mm, MPa
+!
+! Parametri di progetto (da impostare PRIMA di /INPUT, es. da PyMAPDL):
+!   a_h   semiasse del foro lungo X (perpendicolare al carico) [mm]
+!   b_h   semiasse del foro lungo Y (parallelo al carico)      [mm]
+!   sy    tensione di snervamento [MPa]
+!   Htan  modulo tangente dell'incrudimento bilineare [MPa]
+!
+! Il carico (sig_app) e la TOPOLOGIA di mesh sono fissi: al variare di a_h, b_h
+! la mesh si deforma (morphing) ma nodi ed elementi restano gli stessi, quindi
+! gli snapshot sono confrontabili nodo per nodo.
+! Non c'e' /CLEAR: il file va lanciato su un database pulito.
+! =========================================================================
+/PREP7
+/UIS, MSGPOP, 3
+
+! -------------------------------------------------------------------------
+! 1. PARAMETRI FISSI
+! -------------------------------------------------------------------------
+W_p      = 50          ! semilarghezza piastra (X) [mm]
+H_p      = 75          ! semilunghezza piastra (Y, direzione del carico) [mm]
+E_mod    = 70000       ! modulo di Young [MPa] (lega Al)
+nu_mod   = 0.33
+sig_app  = 150        ! tensione nominale applicata a lordo [MPa]
+n_ls     = 10          ! load step (rampa del carico)
+n_th     = 10          ! divisioni lungo mezzo arco del foro
+n_r      = 24          ! divisioni radiali
+r_grad   = 5           ! rapporto dimensione ultimo/primo elemento radiale
+pi_gr    = ACOS(-1)
+
+! -------------------------------------------------------------------------
+! 2. MATERIALE: elasto-plastico bilineare con incrudimento isotropo
+! -------------------------------------------------------------------------
+MP, EX,   1, E_mod
+MP, PRXY, 1, nu_mod
+TB, BISO, 1
+TBDATA, 1, sy, Htan
+
+ET, 1, PLANE183
+KEYOPT, 1, 3, 0         ! plane stress
+
+! -------------------------------------------------------------------------
+! 3. GEOMETRIA: ellisse scomposta in 9 punti (ogni 11.25 deg parametrici),
+!    due spline (0-45 e 45-90 deg), due aree mapped
+! -------------------------------------------------------------------------
+*DO, ik, 1, 9
+    t_par = (ik-1)*pi_gr/16
+    K, ik, a_h*COS(t_par), b_h*SIN(t_par), 0
+*ENDDO
+K, 10, W_p, 0,   0
+K, 11, W_p, H_p, 0
+K, 12, 0,   H_p, 0
+
+BSPLIN, 1, 2, 3, 4, 5   ! L1  arco ellisse 0 -> 45 deg
+BSPLIN, 5, 6, 7, 8, 9   ! L2  arco ellisse 45 -> 90 deg
+L, 5, 11                ! L3  diagonale (dal foro verso l'angolo)
+L, 1, 10                ! L4  bordo y=0 (dal foro verso l'esterno)
+L, 10, 11               ! L5  bordo x=W
+L, 9, 12                ! L6  bordo x=0 (dal foro verso l'esterno)
+L, 12, 11               ! L7  bordo y=H
+
+AL, 1, 3, 5, 4          ! A1
+AL, 2, 6, 7, 3          ! A2
+
+LESIZE, 1, , , n_th
+LESIZE, 5, , , n_th
+LESIZE, 2, , , n_th
+LESIZE, 7, , , n_th
+LESIZE, 3, , , n_r, r_grad
+LESIZE, 4, , , n_r, r_grad
+LESIZE, 6, , , n_r, r_grad
+
+TYPE, 1
+MAT, 1
+MSHAPE, 0, 2D
+MSHKEY, 1               ! mapped
+AMESH, ALL
+
+! -------------------------------------------------------------------------
+! 4. CONDIZIONI AL CONTORNO (simmetria) E CARICO
+! -------------------------------------------------------------------------
+NSEL, S, LOC, X, 0
+D, ALL, UX, 0
+NSEL, S, LOC, Y, 0
+D, ALL, UY, 0
+ALLSEL, ALL
+
+! -------------------------------------------------------------------------
+! 5. SOLUZIONE: rampa del carico in n_ls load step
+! -------------------------------------------------------------------------
+/SOLU
+ANTYPE, STATIC
+NLGEOM, OFF
+NROPT, FULL
+AUTOTS, ON
+NEQIT, 50
+OUTRES, ERASE
+OUTRES, ALL, LAST
+
+*DO, il, 1, n_ls
+    ALLSEL, ALL
+    NSEL, S, LOC, Y, H_p
+    SF, ALL, PRES, -sig_app*il/n_ls     ! pressione negativa = trazione
+    ALLSEL, ALL
+    TIME, il
+    NSUBST, 2, 20, 1
+    SOLVE
+*ENDDO
+FINISH
